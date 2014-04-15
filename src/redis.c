@@ -31,6 +31,7 @@
 #include "cluster.h"
 #include "slowlog.h"
 #include "bio.h"
+#include "reader.h"
 
 #include <time.h>
 #include <signal.h>
@@ -1120,22 +1121,24 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         rewriteAppendOnlyFileBackground();
     }
 
-    /* Check if a background saving or AOF rewrite in progress terminated. */
-    if (server.rdb_child_pid != -1 || server.aof_child_pid != -1) {
+    /* Check if a background saving or AOF rewrite in progress terminated,
+     * or if a local reader crashed. */
+    if (server.rdb_child_pid != -1 || server.aof_child_pid != -1 ||
+        listLength(server.readers) != 0) {
         int statloc;
         pid_t pid;
 
         if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) {
             int exitcode = WEXITSTATUS(statloc);
             int bysignal = 0;
-            
+
             if (WIFSIGNALED(statloc)) bysignal = WTERMSIG(statloc);
 
             if (pid == server.rdb_child_pid) {
                 backgroundSaveDoneHandler(exitcode,bysignal);
             } else if (pid == server.aof_child_pid) {
                 backgroundRewriteDoneHandler(exitcode,bysignal);
-            } else {
+            } else if (!readerExitHandler(pid,exitcode,bysignal)) {
                 redisLog(REDIS_WARNING,
                     "Warning, detected child with unmatched pid: %ld",
                     (long)pid);
@@ -1458,6 +1461,8 @@ void initServerConfig() {
     server.repl_disable_tcp_nodelay = REDIS_DEFAULT_REPL_DISABLE_TCP_NODELAY;
     server.slave_priority = REDIS_DEFAULT_SLAVE_PRIORITY;
     server.master_repl_offset = 0;
+    server.reader_count = 0;
+    server.reader_interval = 300;
 
     /* Replication partial resync backlog */
     server.repl_backlog = NULL;
@@ -1679,6 +1684,7 @@ void initServer() {
     server.clients_to_close = listCreate();
     server.slaves = listCreate();
     server.monitors = listCreate();
+    server.readers = listCreate();
     server.slaveseldb = -1; /* Force to emit the first SELECT command. */
     server.unblocked_clients = listCreate();
     server.ready_keys = listCreate();
@@ -1738,6 +1744,8 @@ void initServer() {
     server.rdb_save_time_last = -1;
     server.rdb_save_time_start = -1;
     server.dirty = 0;
+    server.last_reader_spawn = -1;
+    server.reader_dirty = 0;
     resetServerStats();
     /* A few stats we don't want to reset: server startup time, and peak mem. */
     server.stat_starttime = time(NULL);

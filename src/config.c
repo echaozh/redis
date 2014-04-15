@@ -500,6 +500,16 @@ void loadServerConfigFromString(char *config) {
                 err = sentinelHandleConfiguration(argv+1,argc-1);
                 if (err) goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"reader-count") && argc == 2) {
+            server.reader_count = atoi(argv[1]);
+            if (server.reader_count < 0) {
+                err = "Invalid reader-count value"; goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"reader-interval") && argc == 2) {
+            server.reader_interval = atoi(argv[1]);
+            if (server.reader_interval < 1) {
+                err = "Invalid reader-interval value"; goto loaderr;
+            }
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
         }

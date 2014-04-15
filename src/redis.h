@@ -645,6 +645,7 @@ struct redisServer {
     list *clients;              /* List of active clients */
     list *clients_to_close;     /* Clients to close asynchronously */
     list *slaves, *monitors;    /* List of slaves and MONITORs */
+    list *readers, *oldreaders; /* List of local readers and old readers */
     redisClient *current_client; /* Current client, only used on crash report */
     int clients_paused;         /* True if clients are currently paused */
     mstime_t clients_pause_end_time; /* Time when we undo clients_paused */
@@ -756,6 +757,10 @@ struct redisServer {
     int repl_min_slaves_to_write;   /* Min number of slaves to write. */
     int repl_min_slaves_max_lag;    /* Max lag of <count> slaves to write. */
     int repl_good_slaves_count;     /* Number of slaves with lag <= max_lag. */
+    int reader_count;               /* Configured number of readers */
+    int reader_interval;            /* Configured reader spawn interval */
+    long long reader_dirty;         /* Changes to DB from last reader spawn */
+    time_t last_reader_spawn;       /* Unix time of last reader spawn */
     /* Replication (slave) */
     char *masterauth;               /* AUTH with this password with master */
     char *masterhost;               /* Hostname of master */
@@ -774,6 +779,7 @@ struct redisServer {
     time_t repl_transfer_lastio; /* Unix time of the latest read, for timeout */
     int repl_serve_stale_data; /* Serve stale data when link is down? */
     int repl_slave_ro;          /* Slave is read only? */
+    int repl_slave_reader;      /* Slave is local reader? */
     time_t repl_down_since; /* Unix time at which link with master went down */
     int repl_disable_tcp_nodelay;   /* Disable TCP_NODELAY after SYNC? */
     int slave_priority;             /* Reported in INFO and used by Sentinel. */
