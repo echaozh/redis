@@ -1145,7 +1145,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
             }
             updateDictResizePolicy();
         }
-    } else {
+    } else if (server.rdb_child_pid == -1 && server.aof_child_pid == -1) {
         /* If there is not a background saving/rewrite in progress check if
          * we have to save/rewrite now */
          for (j = 0; j < server.saveparamslen; j++) {
@@ -1221,6 +1221,18 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* Cleanup expired MIGRATE cached sockets. */
     run_with_period(1000) {
         migrateCloseTimedoutSockets();
+    }
+
+    if (server.unixtime-server.last_reader_spawn > server.reader_interval
+        && server.reader_dirty) {
+        readerKill();
+        readerSpawn();
+    } else if (server.unixtime-server.last_reader_spawn > server.reader_retry &&
+               listLength(server.readers) < server.reader_count) {
+        if (server.reader_dirty) {
+            readerKill();
+        }
+        readerSpawn();
     }
 
     server.cronloops++;
@@ -2257,6 +2269,8 @@ int prepareForShutdown(int flags) {
     int nosave = flags & REDIS_SHUTDOWN_NOSAVE;
 
     redisLog(REDIS_WARNING,"User requested shutdown...");
+    /* Kill the local readers */
+    readerKill();
     /* Kill the saving child if there is a background saving in progress.
        We want to avoid race conditions, for instance our saving child may
        overwrite the synchronous saving did by SHUTDOWN. */

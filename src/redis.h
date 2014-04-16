@@ -645,7 +645,7 @@ struct redisServer {
     list *clients;              /* List of active clients */
     list *clients_to_close;     /* Clients to close asynchronously */
     list *slaves, *monitors;    /* List of slaves and MONITORs */
-    list *readers, *oldreaders; /* List of local readers and old readers */
+    list *readers;              /* List of local readers */
     redisClient *current_client; /* Current client, only used on crash report */
     int clients_paused;         /* True if clients are currently paused */
     mstime_t clients_pause_end_time; /* Time when we undo clients_paused */
@@ -759,6 +759,7 @@ struct redisServer {
     int repl_good_slaves_count;     /* Number of slaves with lag <= max_lag. */
     int reader_count;               /* Configured number of readers */
     int reader_interval;            /* Configured reader spawn interval */
+    int reader_retry;               /* Configured reader spawn retry interval */
     long long reader_dirty;         /* Changes to DB from last reader spawn */
     time_t last_reader_spawn;       /* Unix time of last reader spawn */
     /* Replication (slave) */
@@ -1128,6 +1129,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
 void aofRemoveTempFile(pid_t childpid);
 int rewriteAppendOnlyFileBackground(void);
 int loadAppendOnlyFile(char *filename);
+void resetAppendOnly(void);
 void stopAppendOnly(void);
 int startAppendOnly(void);
 void backgroundRewriteDoneHandler(int exitcode, int bysignal);

@@ -1,4 +1,4 @@
-/* Local slave reader control, creation and destruction.
+/* Local slave reader control: spawning and killing.
  *
  * Local slave readers are read only slaves forked by the main Redis server.
  * Readers are forked to exploit the multiple CPU cores for reading requests,
@@ -43,8 +43,8 @@
 #include <sys/types.h>
 
 /* API */
-int readerCreate();
-void readerDestroy(int n);
+void readerSpawn(void);
+void readerKill(void);
 /* returns 1 if pid is a reader, 0 otherwise */
 int readerExitHandler(pid_t pid, int exitcode, int bysignal);
 

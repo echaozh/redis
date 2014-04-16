@@ -1,4 +1,4 @@
-/* Local slave reader control, creation and destruction.
+/* Local slave reader control: spawning and killing.
  *
  * Local slave readers are read only slaves forked by the main Redis server.
  * Readers are forked to exploit the multiple CPU cores for reading requests,
@@ -41,8 +41,13 @@
 #include "reader.h"
 
 #include <signal.h>
+#include <sys/wait.h>
 
-static int readerCreateOne() {
+static void resetReaderParams(void) {
+    server.reader_count = 0;
+}
+
+static int readerSpawnOne(void) {
     pid_t childpid;
     long long start;
 
@@ -50,11 +55,13 @@ static int readerCreateOne() {
     if ((childpid = fork()) == 0) {
         /* Child */
         closeListeningSockets(0);
-        /* TODO: closeClientSockets(); */
-        /* Prevent reader from saving rdb in the background */
-        /* Don't worry about aof, as there're no writes, there're no aof */
+        /* TODO: closeClients(); */
+        /* Prevent reader from saving rdb in the background. */
         resetServerSaveParams();
-        /* TODO: resetReaderParams(); */
+        /* Disable aof. */
+        resetAppendOnly();
+        /* Reader should not spawn more readers. */
+        resetReaderParams();
         redisSetProcTitle("redis-local-reader");
         return REDIS_OK;
     } else {
@@ -66,51 +73,69 @@ static int readerCreateOne() {
             return REDIS_ERR;
         }
         redisLog(REDIS_VERBOSE,"Local reader spawn as pid %d", childpid);
-        if (!listAddNodeHead(server.readers, (void*)(ptrdiff_t)childpid)) {
-            redisLog(REDIS_WARNING,"No memory to reference reader of pid %d",
+        if (!listAddNodeHead(server.readers,(void*)(ptrdiff_t)childpid)) {
+            int statloc;
+
+            redisLog(REDIS_WARNING,"No memory to reference reader with pid %d",
                 childpid);
-            kill(childpid,SIGKILL);
+            if (kill(childpid,SIGKILL) != -1)
+                wait3(&statloc,childpid,NULL);
+            else {
+                redisLog(REDIS_WARNING,"failed to kill reader with pid %d",
+                    childpid);
+            }
             return REDIS_ERR;
         }
         return REDIS_OK;
     }
 }
 
-int readerCreate() {
-    int retval;
+void readerSpawn(void) {
     int i = listLength(server.readers);
 
-    if(server.reader_count <= i) {
-        return REDIS_OK;
-    }
+    if(server.reader_count <= i)
+        return;
 
-    retval = 0;
-    for (; i < server.reader_count; i++) {
-        retval = retval | readerCreateOne();
-    }
+    for (; i < server.reader_count; i++)
+        readerSpawnOne();
 
     /* Even if not all readers are up, we can update states
      * so we can later check if the up readers need to be killed or not on
      * retry */
     server.reader_dirty = 0;
     server.last_reader_spawn = time(NULL);
+}
 
-    return retval;
+void readerKill() {
+    listNode *ln;
+    listIter li;
+
+    listRewind(server.readers,&li);
+    while((ln = listNext(&li))) {
+        pid_t reader = (pid_t)(ptrdiff_t)listNodeValue(ln);
+
+        if (kill(reader,SIGKILL) != -1)
+            redisLog(REDIS_VERBOSE,"killing local reader with pid %d", reader);
+        else {
+            redisLog(REDIS_WARNING,"failed to kill local reader with pid %d",
+                reader);
+            listDelNode(server.readers,ln);
+        }
+    }
+
+    listRewind(server.readers,&li);
+    while((ln = listNext(&li))) {
+        int statloc;
+        pid_t reader = (pid_t)(ptrdiff_t)listNodeValue(ln);
+
+        wait3(&statloc,reader,NULL);
+        listDelNode(server.readers,ln);
+    }
 }
 
 int readerExitHandler(pid_t pid, int exitcode, int bysignal) {
     listNode *ln;
     listIter li;
-
-    listRewind(server.oldreaders,&li);
-    while((ln = listNext(&li))) {
-        pid_t reader = (pid_t)(ptrdiff_t)listNodeValue(ln);
-        if (reader == pid) {
-            redisLog(REDIS_VERBOSE,"old reader killed with pid %d",pid);
-            listDelNode(server.oldreaders,ln);
-            return 1;
-        }
-    }
 
     listRewind(server.readers,&li);
     while((ln = listNext(&li))) {
@@ -124,7 +149,7 @@ int readerExitHandler(pid_t pid, int exitcode, int bysignal) {
                     pid, bysignal);
             }
             listDelNode(server.readers,ln);
-            readerCreateOne();
+            readerSpawnOne();
             return 1;
         }
     }
