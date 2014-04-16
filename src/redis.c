@@ -1206,6 +1206,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
     /* Replication cron function -- used to reconnect to master and
      * to detect transfer failures. */
+    /* Local readers don't replicate, and thus don't go into the cron */
     run_with_period(1000) {
         if (!server.repl_slave_reader) replicationCron();
     }

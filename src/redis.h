@@ -1010,6 +1010,7 @@ int getClientLimitClassByName(char *name);
 char *getClientLimitClassName(int class);
 void flushSlavesOutputBuffers(void);
 void disconnectSlaves(void);
+void disconnectClients(void);
 int listenToPort(int port, int *fds, int *count);
 void pauseClients(mstime_t duration);
 int clientsArePaused(void);

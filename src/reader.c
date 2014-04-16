@@ -50,6 +50,8 @@ static void resetReaderParams(void) {
 static void setupAsSlave(void) {
     /* First unset current master if there's any. */
     replicationUnsetMaster();
+    /* Disconnect connected slaves. */
+    disconnectSlaves();
 
     server.masterhost = "";     /* So long as it is not NULL */
     server.repl_serve_stale_data = 1;
@@ -65,7 +67,6 @@ static int readerSpawnOne(void) {
     if ((childpid = fork()) == 0) {
         /* Child */
         closeListeningSockets(0);
-        /* TODO: closeClients(); */
         /* Prevent reader from saving rdb in the background. */
         resetServerSaveParams();
         /* Disable aof. */
@@ -75,8 +76,7 @@ static int readerSpawnOne(void) {
         /* Act as a read-only slave which serves stale data, and never connect
          * to the master */
         setupAsSlave();
-        /* we're readonly slave which serves stale data, and never connects to
-         * master */
+        /* TODO: disconnectClients(); */
         redisSetProcTitle("redis-local-reader");
         return REDIS_OK;
     } else {
@@ -150,24 +150,18 @@ void readerKill() {
 
 int readerExitHandler(pid_t pid, int exitcode, int bysignal) {
     listNode *ln;
-    listIter li;
 
-    listRewind(server.readers,&li);
-    while((ln = listNext(&li))) {
-        pid_t reader = (pid_t)(ptrdiff_t)listNodeValue(ln);
-        if (reader == pid) {
-            if (!bysignal) {
-                redisLog(REDIS_WARNING,"reader with pid %d exited with code %d",
-                    pid, exitcode);
-            } else {
-                redisLog(REDIS_WARNING,"reader with pid %d killed by signal %d",
-                    pid, bysignal);
-            }
-            listDelNode(server.readers,ln);
-            readerSpawnOne();
-            return 1;
+    if ((ln = listSearchKey(server.readers,(void*)(ptrdiff_t)pid))) {
+        if (!bysignal) {
+            redisLog(REDIS_WARNING,"reader with pid %d exited with code %d",
+                pid, exitcode);
+        } else {
+            redisLog(REDIS_WARNING,"reader with pid %d killed by signal %d",
+                pid, bysignal);
         }
-    }
-
-    return 0;
+        listDelNode(server.readers,ln);
+        readerSpawnOne();
+        return 1;
+    } else
+        return 0;
 }

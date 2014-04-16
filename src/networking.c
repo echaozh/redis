@@ -619,14 +619,24 @@ static void freeClientArgv(redisClient *c) {
     c->cmd = NULL;
 }
 
+/* Close all the client connections. */
+static void disconnectFromList(list *clients) {
+    while (listLength(clients)) {
+        listNode *ln = listFirst(clients);
+        freeClient((redisClient*)ln->value);
+    }
+}
+/* Close all the client connections. */
+void disconnectClients(void) {
+    disconnectFromList(server.clients);
+}
+
 /* Close all the slaves connections. This is useful in chained replication
  * when we resync with our own master and want to force all our slaves to
  * resync with us as well. */
+
 void disconnectSlaves(void) {
-    while (listLength(server.slaves)) {
-        listNode *ln = listFirst(server.slaves);
-        freeClient((redisClient*)ln->value);
-    }
+    disconnectFromList(server.slaves);
 }
 
 /* This function is called when the slave lose the connection with the
