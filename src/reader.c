@@ -47,6 +47,16 @@ static void resetReaderParams(void) {
     server.reader_count = 0;
 }
 
+static void setupAsSlave(void) {
+    /* First unset current master if there's any. */
+    replicationUnsetMaster();
+
+    server.masterhost = "";     /* So long as it is not NULL */
+    server.repl_serve_stale_data = 1;
+    server.repl_slave_ro = 1;
+    server.repl_slave_reader = 1;
+}
+
 static int readerSpawnOne(void) {
     pid_t childpid;
     long long start;
@@ -62,6 +72,11 @@ static int readerSpawnOne(void) {
         resetAppendOnly();
         /* Reader should not spawn more readers. */
         resetReaderParams();
+        /* Act as a read-only slave which serves stale data, and never connect
+         * to the master */
+        setupAsSlave();
+        /* we're readonly slave which serves stale data, and never connects to
+         * master */
         redisSetProcTitle("redis-local-reader");
         return REDIS_OK;
     } else {

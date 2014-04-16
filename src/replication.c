@@ -417,6 +417,8 @@ void syncCommand(redisClient *c) {
 
     /* Refuse SYNC requests if we are a slave but the link with our master
      * is not ok... */
+    /* Local readers' repl_state is always REDIS_REPL_NONE, so they always turn
+     * down SYNC requests here */
     if (server.masterhost && server.repl_state != REDIS_REPL_CONNECTED) {
         addReplyError(c,"Can't SYNC while not connected with my master");
         return;
@@ -1293,6 +1295,13 @@ void slaveofCommand(redisClient *c) {
      * configured using the current address of the master node. */
     if (server.cluster_enabled) {
         addReplyError(c,"SLAVEOF not allowed in cluster mode.");
+        return;
+    }
+
+    /* SLAVEOF is not allowed for local readers either, as readers will not
+     * actually replicate from masters, and will be killed periodically. */
+    if (server.repl_slave_reader) {
+        addReplyError(c,"SLAVEOF not allowed in reader mode.");
         return;
     }
 
