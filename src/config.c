@@ -127,6 +127,11 @@ void loadServerConfigFromString(char *config) {
             if (server.port < 0 || server.port > 65535) {
                 err = "Invalid port"; goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"reader-port") && argc == 2) {
+            server.reader_port = atoi(argv[1]);
+            if (server.reader_port < 0 || server.reader_port > 65535) {
+                err = "Invalid reader port"; goto loaderr;
+            }
         } else if (!strcasecmp(argv[0],"tcp-backlog") && argc == 2) {
             server.tcp_backlog = atoi(argv[1]);
             if (server.tcp_backlog < 0) {
@@ -143,6 +148,8 @@ void loadServerConfigFromString(char *config) {
             server.bindaddr_count = addresses;
         } else if (!strcasecmp(argv[0],"unixsocket") && argc == 2) {
             server.unixsocket = zstrdup(argv[1]);
+        } else if (!strcasecmp(argv[0],"reader-unixsocket") && argc == 2) {
+            server.reader_unixsocket = zstrdup(argv[1]);
         } else if (!strcasecmp(argv[0],"unixsocketperm") && argc == 2) {
             errno = 0;
             server.unixsocketperm = (mode_t)strtol(argv[1], NULL, 8);

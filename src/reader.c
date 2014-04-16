@@ -84,7 +84,16 @@ static int readerSpawnOne(void) {
         /* Sentinels don't need readers. */
         redisAssert(!server.sentinel_mode);
 
+        /* Switch port so proc title reflects it. */
+        server.port = server.reader_port;
+        if (server.unixsocket) zfree(server.unixsocket);
+        server.unixsocket = server.reader_unixsocket;
+        server.reader_unixsocket = NULL;
         redisSetProcTitle("redis-local-reader");
+
+        initListeners();
+        initAcceptors();
+
         return REDIS_OK;
     } else {
         /* Parent */
