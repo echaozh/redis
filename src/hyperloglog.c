@@ -176,7 +176,7 @@
  * involved in updating the sparse representation is not justified by the
  * memory savings. The exact maximum length of the sparse representation
  * when this implementation switches to the dense representation is
- * configured via the define HLL_SPARSE_MAX.
+ * configured via the define server.hll_sparse_max_bytes.
  */
 
 struct hllhdr {
@@ -201,8 +201,6 @@ struct hllhdr {
 #define HLL_DENSE 0 /* Dense encoding */
 #define HLL_SPARSE 1 /* Sparse encoding */
 #define HLL_MAX_ENCODING 1
-
-#define HLL_SPARSE_MAX 3000
 
 static char *invalid_hll_err = "Corrupted HLL object detected";
 
@@ -634,7 +632,7 @@ int hllSparseToDense(robj *o) {
  * As a side effect the function may promote the HLL representation from
  * sparse to dense: this happens when a register requires to be set to a value
  * not representable with the sparse representation, or when the resulting
- * size would be greater than HLL_SPARSE_MAX. */
+ * size would be greater than server.hll_sparse_max_bytes. */
 int hllSparseAdd(robj *o, unsigned char *ele, size_t elesize) {
     struct hllhdr *hdr;
     uint8_t oldcount, count, *sparse, *end, *p, *prev, *next;
@@ -815,7 +813,8 @@ int hllSparseAdd(robj *o, unsigned char *ele, size_t elesize) {
      int oldlen = is_xzero ? 2 : 1;
      int deltalen = seqlen-oldlen;
 
-     if (deltalen > 0 && sdslen(o->ptr)+deltalen > HLL_SPARSE_MAX) goto promote;
+     if (deltalen > 0 &&
+         sdslen(o->ptr)+deltalen > server.hll_sparse_max_bytes) goto promote;
      if (deltalen && next) memmove(next+deltalen,next,end-next);
      sdsIncrLen(o->ptr,deltalen);
      memcpy(p,seq,seqlen);
@@ -1258,7 +1257,8 @@ void pfmergeCommand(redisClient *c) {
 void pfselftestCommand(redisClient *c) {
     int j, i;
     sds bitcounters = sdsnewlen(NULL,HLL_DENSE_SIZE);
-    struct hllhdr *hdr = (struct hllhdr*) bitcounters;
+    struct hllhdr *hdr = (struct hllhdr*) bitcounters, *hdr2;
+    robj *o = NULL;
     uint8_t bytecounters[HLL_REGISTERS];
 
     /* Test 1: access registers.
@@ -1289,20 +1289,43 @@ void pfselftestCommand(redisClient *c) {
     }
 
     /* Test 2: approximation error.
-     * The test is adds unique elements and check that the estimated value
+     * The test adds unique elements and check that the estimated value
      * is always reasonable bounds.
      * 
      * We check that the error is smaller than 4 times than the expected
      * standard error, to make it very unlikely for the test to fail because
-     * of a "bad" run. */
+     * of a "bad" run.
+     *
+     * The test is performed with both dense and sparse HLLs at the same
+     * time also verifying that the computed cardinality is the same. */
     memset(hdr->registers,0,HLL_DENSE_SIZE-HLL_HDR_SIZE);
+    o = createHLLObject();
     double relerr = 1.04/sqrt(HLL_REGISTERS);
-    int64_t checkpoint = 1000;
+    int64_t checkpoint = 1;
     uint64_t seed = (uint64_t)rand() | (uint64_t)rand() << 32;
     uint64_t ele;
     for (j = 1; j <= 10000000; j++) {
         ele = j ^ seed;
         hllDenseAdd(hdr->registers,(unsigned char*)&ele,sizeof(ele));
+        hllAdd(o,(unsigned char*)&ele,sizeof(ele));
+
+        /* Make sure that for small cardinalities we use sparse
+         * encoding. */
+        if (j == checkpoint && j < server.hll_sparse_max_bytes/2) {
+            hdr2 = o->ptr;
+            if (hdr2->encoding != HLL_SPARSE) {
+                addReplyError(c, "TESTFAILED sparse encoding not used");
+                goto cleanup;
+            }
+        }
+
+        /* Check that dense and sparse representations agree. */
+        if (j == checkpoint && hllCount(hdr,NULL) != hllCount(o->ptr,NULL)) {
+                addReplyError(c, "TESTFAILED dense/sparse disagree");
+                goto cleanup;
+        }
+
+        /* Check error. */
         if (j == checkpoint) {
             int64_t abserr = checkpoint - (int64_t)hllCount(hdr,NULL);
             if (abserr < 0) abserr = -abserr;
@@ -1322,6 +1345,7 @@ void pfselftestCommand(redisClient *c) {
 
 cleanup:
     sdsfree(bitcounters);
+    if (o) decrRefCount(o);
 }
 
 /* PFDEBUG <subcommand> <key> ... args ...
