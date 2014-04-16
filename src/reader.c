@@ -69,6 +69,7 @@ static int readerSpawnOne(void) {
         closeListeningSockets(0);
         /* Prevent reader from saving rdb in the background. */
         resetServerSaveParams();
+        server.rdb_child_pid = -1;
         /* Disable aof. */
         resetAppendOnly();
         /* Reader should not spawn more readers. */
@@ -76,7 +77,13 @@ static int readerSpawnOne(void) {
         /* Act as a read-only slave which serves stale data, and never connect
          * to the master */
         setupAsSlave();
-        /* TODO: disconnectClients(); */
+        disconnectClients();
+
+        /* Readers are not part of cluster. */
+        server.cluster_enabled = 0;
+        /* Sentinels don't need readers. */
+        redisAssert(!server.sentinel_mode);
+
         redisSetProcTitle("redis-local-reader");
         return REDIS_OK;
     } else {

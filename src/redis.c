@@ -1111,7 +1111,9 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     clientsCron();
 
     /* Handle background operations on Redis databases. */
-    databasesCron();
+    /* Readers don't need such operations, as they're immutable and background
+     * operations only cause unnecessary copy-on-write pages. */
+    if (!server.repl_slave_reader) databasesCron();
 
     /* Start a scheduled AOF rewrite if this was requested by the user while
      * a BGSAVE was in progress. */
@@ -1226,16 +1228,23 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         migrateCloseTimedoutSockets();
     }
 
-    if (server.unixtime-server.last_reader_spawn > server.reader_interval
-        && server.reader_dirty) {
-        readerKill();
-        readerSpawn();
-    } else if (server.unixtime-server.last_reader_spawn > server.reader_retry &&
-               listLength(server.readers) < server.reader_count) {
-        if (server.reader_dirty) {
-            readerKill();
+    /* Check for respawns of local readers.
+     * Do it at the end, because for the forked readers, states and configs
+     * may abruptly change. */
+    run_with_period(1000) {
+        if (!server.sentinel_mode) {
+            if (server.unixtime-server.last_reader_spawn > server.reader_interval &&
+                server.reader_dirty) {
+                readerKill();
+                readerSpawn();
+            } else if (server.unixtime-server.last_reader_spawn > server.reader_retry &&
+                       listLength(server.readers) < server.reader_count) {
+                if (server.reader_dirty) {
+                    readerKill();
+                }
+                readerSpawn();
+            }
         }
-        readerSpawn();
     }
 
     server.cronloops++;
